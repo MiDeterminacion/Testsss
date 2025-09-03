@@ -1,4 +1,4 @@
-    import streamlit as st
+import streamlit as st
 
 st.set_page_config(page_title="Worm/Nodes Demo", layout="wide")
 st.title("Animación tipo 'worm' siguiendo el mouse (HTML + JS dentro de Streamlit)")
