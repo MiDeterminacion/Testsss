@@ -1,7 +1,7 @@
 import streamlit as st
 
 st.set_page_config(page_title="Worm/Nodes Demo", layout="wide")
-st.title("Animación tipo 'worm' siguiendo el mouse (HTML + JS dentro de Streamlit)")
+st.title("Animación tipo 'worm' siguiendo el dedo o el mouse (HTML + JS dentro de Streamlit)")
 
 html_code = """
 <style>
@@ -16,7 +16,12 @@ html_code = """
     border-radius:12px;
     overflow:hidden;
   }
-  canvas { display:block; width:100%; height:100%; }
+  canvas {
+    display:block; width:100%; height:100%;
+    /* MUY IMPORTANTE EN MÓVIL: permite que el canvas capture los gestos */
+    touch-action: none;           /* evita que el scroll intercepte el gesto */
+    -ms-touch-action: none;
+  }
   .hint {
     color:#aaa; font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
     font-size:14px; margin-top:.5rem; text-align:center;
@@ -26,7 +31,7 @@ html_code = """
 <div id="wrap">
   <canvas id="cv"></canvas>
 </div>
-<div class="hint">Mueve el mouse o toca (en móvil) dentro del lienzo.</div>
+<div class="hint">Toca o arrastra dentro del lienzo. (Si no responde, vuelve a tocar una vez más dentro.)</div>
 
 <script>
 // ---------- Canvas y tamaño ----------
@@ -36,7 +41,6 @@ const ctx = canvas.getContext("2d");
 
 function resize() {
   const r = wrap.getBoundingClientRect();
-  // resolución real del canvas (no solo CSS)
   canvas.width  = Math.max(400, Math.floor(r.width));
   canvas.height = Math.max(300, Math.floor(r.height));
 }
@@ -47,17 +51,15 @@ window.addEventListener("resize", resize);
 class Node {
   constructor(x, y, size) {
     this.x = x; this.y = y;
-    this.size = size; // distancia hasta el siguiente segmento
+    this.size = size;
   }
 }
 
 class Worm {
   constructor(n, startX, startY) {
     this.nodes = [];
-    this.end = { x: startX, y: startY }; // última posición objetivo
-    this.speed = 6;                       // holgura/elasticidad
-
-    // crear segmentos decrecientes
+    this.end = { x: startX, y: startY };
+    this.speed = 6;
     let len = 18;
     for (let i = 0; i < n; i++) {
       this.nodes.push(new Node(startX, startY, Math.max(6, len)));
@@ -65,7 +67,6 @@ class Worm {
     }
   }
 
-  // --- Transcripción/port del snippet de la imagen ---
   moveTo(x, y) {
     let dist = ((x - this.end.x) ** 2 + (y - this.end.y) ** 2) ** 0.5;
     let len = Math.max(0, dist - this.speed);
@@ -79,19 +80,14 @@ class Worm {
     this.end.x = x; this.end.y = y;
   }
 
-  // --- Dibujo COMPLETO (línea + “espinas”) ---
   draw(ctx) {
-    // línea principal (conecta todos los nodos)
     ctx.lineWidth = 2;
     ctx.strokeStyle = "#dddddd";
     ctx.beginPath();
     ctx.moveTo(this.nodes[0].x, this.nodes[0].y);
-    for (let i = 1; i < this.nodes.length; i++) {
-      ctx.lineTo(this.nodes[i].x, this.nodes[i].y);
-    }
+    for (let i = 1; i < this.nodes.length; i++) ctx.lineTo(this.nodes[i].x, this.nodes[i].y);
     ctx.stroke();
 
-    // “espinas” laterales para estilo esquelético
     ctx.lineWidth = 1;
     ctx.strokeStyle = "#cccccc";
     for (let i = 2; i < this.nodes.length; i += 2) {
@@ -99,29 +95,55 @@ class Worm {
       const ang = Math.atan2(b.y - a.y, b.x - a.x);
       const nx = Math.cos(ang + Math.PI / 2), ny = Math.sin(ang + Math.PI / 2);
       const cx = b.x, cy = b.y, s = Math.max(3, b.size * 0.35);
-
       ctx.beginPath();
-      ctx.moveTo(cx, cy);
-      ctx.lineTo(cx + nx * s, cy + ny * s);
-      ctx.moveTo(cx, cy);
-      ctx.lineTo(cx - nx * s, cy - ny * s);
+      ctx.moveTo(cx, cy); ctx.lineTo(cx + nx * s, cy + ny * s);
+      ctx.moveTo(cx, cy); ctx.lineTo(cx - nx * s, cy - ny * s);
       ctx.stroke();
     }
   }
 }
 
-// ---------- Interacción ----------
+// ---------- Interacción robusta (pointer + touch + mouse) ----------
 const mouse = { x: canvas.width * 0.5, y: canvas.height * 0.5 };
+let isPointerActive = false;
 
-function setMouseFromEvent(clientX, clientY) {
+function setFromClientXY(clientX, clientY) {
   const r = canvas.getBoundingClientRect();
   mouse.x = clientX - r.left;
   mouse.y = clientY - r.top;
 }
 
-canvas.addEventListener("mousemove", (e) => setMouseFromEvent(e.clientX, e.clientY));
-canvas.addEventListener("touchstart", (e) => { const t = e.touches[0]; setMouseFromEvent(t.clientX, t.clientY); e.preventDefault(); }, {passive:false});
-canvas.addEventListener("touchmove",  (e) => { const t = e.touches[0]; setMouseFromEvent(t.clientX, t.clientY); e.preventDefault(); }, {passive:false});
+canvas.addEventListener("pointerdown", (e) => {
+  isPointerActive = true;
+  setFromClientXY(e.clientX, e.clientY);
+  // Captura el puntero dentro del canvas (evita que se “escape” en móvil)
+  try { canvas.setPointerCapture(e.pointerId); } catch(_) {}
+  e.preventDefault();
+}, {passive:false});
+
+canvas.addEventListener("pointermove", (e) => {
+  if (!isPointerActive && e.pointerType === "mouse" && e.buttons === 0) return;
+  setFromClientXY(e.clientX, e.clientY);
+  e.preventDefault();
+}, {passive:false});
+
+canvas.addEventListener("pointerup", (e) => {
+  isPointerActive = false;
+  e.preventDefault();
+}, {passive:false});
+
+// Fallbacks por compatibilidad (algunos navegadores viejos)
+canvas.addEventListener("touchstart", (e) => {
+  const t = e.touches[0]; setFromClientXY(t.clientX, t.clientY);
+  e.preventDefault();
+}, {passive:false});
+canvas.addEventListener("touchmove", (e) => {
+  const t = e.touches[0]; setFromClientXY(t.clientX, t.clientY);
+  e.preventDefault();
+}, {passive:false});
+
+// Click simple (por si el navegador bloquea pointer/touch la primera vez)
+canvas.addEventListener("click", (e) => setFromClientXY(e.clientX, e.clientY));
 
 // ---------- Animación ----------
 const worm = new Worm(34, mouse.x, mouse.y);
